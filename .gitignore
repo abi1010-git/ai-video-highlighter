@@ -1,0 +1,24 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Local media and generated artifacts
+*.mp4
+*.mov
+*.mkv
+*.avi
+uploads/*
+outputs/*
+transcripts/*
+!uploads/.gitkeep
+!outputs/.gitkeep
+!transcripts/.gitkeep
+
+# Training artifacts
+data/raw_transcripts/*
+data/training_examples.csv
+data/transcript_urls.txt
+models/*.joblib
+!data/raw_transcripts/.gitkeep
+!models/.gitkeep

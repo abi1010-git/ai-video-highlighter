@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ai-video-highlighter
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.streamlit
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+

@@ -1,0 +1,11 @@
+# Paste only transcript URLs you are allowed to reuse into data/transcript_urls.txt.
+# Open Yale Courses pages are generally CC BY-NC-SA 3.0, subject to each page credits section:
+# https://oyc.yale.edu/help
+#
+# Example lecture transcript pages:
+https://oyc.yale.edu/psychology/psyc-110/lecture-1
+https://oyc.yale.edu/physics/phys-201/lecture-1
+https://oyc.yale.edu/astronomy/astr-160/lecture-1
+https://oyc.yale.edu/ecology-and-evolutionary-biology/eeb-122/lecture-1
+https://oyc.yale.edu/chemistry/chem-125a/lecture-1
+

@@ -1,0 +1,11 @@
+flask
+gunicorn
+streamlit
+openai
+python-dotenv
+moviepy
+imageio-ffmpeg
+requests
+beautifulsoup4
+scikit-learn
+joblib
