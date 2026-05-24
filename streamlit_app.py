@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import uuid
 from pathlib import Path
 
 import streamlit as st
 
 from highlighter import (
-    MissingApiKey,
     TranscriptionError,
     VideoEditingError,
     analyze_video,
@@ -29,8 +27,6 @@ for folder in (UPLOAD_DIR, TRANSCRIPT_DIR, OUTPUT_DIR):
 
 
 def main() -> None:
-    _load_streamlit_secret()
-
     st.set_page_config(
         page_title="AI Video Highlighter",
         page_icon=":movie_camera:",
@@ -53,7 +49,13 @@ def main() -> None:
         transcript_file = st.file_uploader(
             "Transcript file",
             type=["srt", "vtt", "json"],
-            help="Optional. Without this, the app uses your OpenAI API key to transcribe.",
+            help="Optional. Without this, the app transcribes the video with local OpenAI Whisper.",
+        )
+        whisper_model = st.selectbox(
+            "Whisper model",
+            options=["tiny.en", "base.en", "small.en"],
+            index=0,
+            help="tiny.en is fastest for hosted demos; base.en and small.en are usually more accurate.",
         )
         max_results = st.slider("Highlights", min_value=3, max_value=15, value=8)
         use_trained_model = st.checkbox(
@@ -119,6 +121,7 @@ def main() -> None:
                     provided_segments=provided_segments,
                     transcript_cache_dir=TRANSCRIPT_DIR,
                     highlight_model_path=MODEL_PATH if use_trained_model else None,
+                    whisper_model=whisper_model,
                 )
 
                 st.session_state.last_video_path = str(video_path)
@@ -141,10 +144,6 @@ def main() -> None:
                         st.session_state.last_jumpcut_path = str(output) if output else None
                     except VideoEditingError as exc:
                         st.session_state.jumpcut_warning = str(exc)
-            except MissingApiKey as exc:
-                analysis_failed = True
-                _clear_previous_analysis(keep_current_video=True)
-                _render_analysis_error(str(exc), include_key_help=True)
             except TranscriptionError as exc:
                 analysis_failed = True
                 _clear_previous_analysis(keep_current_video=True)
@@ -233,9 +232,8 @@ def _render_highlights() -> None:
 
 def _render_key_help() -> None:
     st.info(
-        "For automatic transcription, add OPENAI_API_KEY as a local .env value, "
-        "a Streamlit secret, or a Render environment variable. You can also upload "
-        "an SRT, VTT, or timestamped JSON transcript to avoid API usage."
+        "Local Whisper does not need an API key, but it does need the openai-whisper package "
+        "and FFmpeg. You can also upload an SRT, VTT, or timestamped JSON transcript."
     )
 
 
@@ -285,17 +283,6 @@ def _clear_previous_analysis(keep_current_video: bool = False) -> None:
 
     for key in keys:
         st.session_state.pop(key, None)
-
-
-def _load_streamlit_secret() -> None:
-    if os.getenv("OPENAI_API_KEY"):
-        return
-    try:
-        api_key = st.secrets.get("OPENAI_API_KEY")
-    except Exception:
-        api_key = None
-    if api_key:
-        os.environ["OPENAI_API_KEY"] = str(api_key)
 
 
 if __name__ == "__main__":

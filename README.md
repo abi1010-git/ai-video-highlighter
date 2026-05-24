@@ -1,6 +1,6 @@
 # AI Video Highlighter
 
-Upload a video, transcribe it, rank the most relevant timestamped moments, and create a jumpcut edit that skips interruptions, breaks, and low-importance sections.
+Upload a video, transcribe it with local OpenAI Whisper, rank the most relevant timestamped moments, and create a jumpcut edit that skips interruptions, breaks, and low-importance sections.
 
 ## Streamlit Website
 
@@ -21,6 +21,8 @@ The Streamlit app shows:
 - timestamped highlight cards that jump the full lecture to important moments
 - a download button for the jumpcut MP4
 
+Automatic transcription uses the open-source `openai-whisper` package locally. No API key is needed. The first local Whisper run downloads the selected model weights, so it can take a few minutes.
+
 ### Deploy on Streamlit Community Cloud
 
 1. Push this folder to GitHub.
@@ -32,13 +34,7 @@ The Streamlit app shows:
    streamlit_app.py
    ```
 
-5. In the app settings, add this secret:
-
-   ```toml
-   OPENAI_API_KEY = "your_api_key_here"
-   ```
-
-`packages.txt` installs FFmpeg for the hosted app.
+5. Deploy the app. `runtime.txt` asks Streamlit for Python 3.11, and `packages.txt` installs FFmpeg for Whisper.
 
 ### Deploy on Render
 
@@ -47,7 +43,6 @@ This repo includes `render.yaml`, so Render can create the service from your Git
 1. Push this folder to GitHub.
 2. In Render, choose **New Blueprint**.
 3. Select this repository.
-4. Add `OPENAI_API_KEY` as an environment variable.
 
 Render will use `Dockerfile.streamlit` and publish the Streamlit website.
 
@@ -71,23 +66,25 @@ Render will use `Dockerfile.streamlit` and publish the Streamlit website.
    python -m pip install -r requirements.txt
    ```
 
-4. Copy `.env.example` to `.env`, then paste your OpenAI API key:
+4. Copy `.env.example` to `.env`:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-5. Start the web app:
+   Keep `WHISPER_MODEL=tiny.en` for faster local transcription. If Whisper install fails, use a Python 3.11 virtual environment.
+
+5. Start the Streamlit web app:
 
    ```powershell
-   python app.py
+   streamlit run streamlit_app.py
    ```
 
-6. Open http://127.0.0.1:5000 in your browser.
+6. Open http://127.0.0.1:8501 in your browser.
 
 ## Run with Docker
 
-1. Create your `.env` file if you want automatic transcription:
+1. Create your `.env` file:
 
    ```powershell
    Copy-Item .env.example .env
@@ -113,9 +110,17 @@ Stop the website with:
 docker compose down
 ```
 
-## Use without an API key
+## Transcription
 
-Upload a timestamped `.srt`, `.vtt`, or `.json` transcript with the video. The app can rank those transcript moments without calling the transcription API.
+Default automatic transcription uses local OpenAI Whisper:
+
+```powershell
+python main.py lecture.mp4 --query "exam tips" --whisper-model tiny.en
+```
+
+For better accuracy on longer lectures, try `base.en` or `small.en`. They are slower and need more memory.
+
+You can still upload a timestamped `.srt`, `.vtt`, or `.json` transcript with the video. The app can rank those transcript moments without running Whisper.
 
 ## Train A Small Highlight Model
 
@@ -153,6 +158,12 @@ If `models/highlight_model.joblib` exists, the Streamlit sidebar will let you us
 
 ```powershell
 python main.py lecture.mp4 --query "exam tips"
+```
+
+With a larger local Whisper model:
+
+```powershell
+python main.py lecture.mp4 --query "exam tips" --whisper-model base.en
 ```
 
 With an existing transcript:

@@ -4,7 +4,6 @@ import argparse
 from pathlib import Path
 
 from highlighter import (
-    MissingApiKey,
     TranscriptionError,
     VideoEditingError,
     analyze_video,
@@ -26,6 +25,11 @@ def main() -> int:
     parser.add_argument(
         "--transcript",
         help="Optional timestamped transcript file (.srt, .vtt, or .json).",
+    )
+    parser.add_argument(
+        "--whisper-model",
+        default="tiny.en",
+        help="Local Whisper model to use, for example tiny.en, base.en, or small.en.",
     )
     parser.add_argument("--max-results", type=int, default=8)
     parser.add_argument(
@@ -57,8 +61,9 @@ def main() -> int:
             max_results=args.max_results,
             transcript_path=args.transcript,
             highlight_model_path=args.model,
+            whisper_model=args.whisper_model,
         )
-    except (MissingApiKey, TranscriptionError, ValueError) as exc:
+    except (TranscriptionError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 

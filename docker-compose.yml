@@ -1,11 +1,13 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
     ports:
-      - "5050:5000"
+      - "5050:8501"
     environment:
-      PORT: "5000"
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PORT: "8501"
+      WHISPER_MODEL: ${WHISPER_MODEL:-tiny.en}
     volumes:
       - ./uploads:/app/uploads
       - ./transcripts:/app/transcripts

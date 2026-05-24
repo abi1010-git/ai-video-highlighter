@@ -8,7 +8,6 @@ from flask import Flask, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
 from highlighter import (
-    MissingApiKey,
     TranscriptionError,
     analyze_video,
     highlight_to_dict,
@@ -70,7 +69,7 @@ def analyze():
             transcript_cache_dir=TRANSCRIPT_DIR,
             highlight_model_path=MODEL_PATH if MODEL_PATH.exists() else None,
         )
-    except (MissingApiKey, RuntimeError, TranscriptionError, ValueError) as exc:
+    except (RuntimeError, TranscriptionError, ValueError) as exc:
         return render_template(
             "index.html",
             error=str(exc),

@@ -1,7 +1,7 @@
 flask
 gunicorn
 streamlit
-openai
+openai-whisper
 python-dotenv
 moviepy
 imageio-ffmpeg

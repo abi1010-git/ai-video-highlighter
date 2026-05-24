@@ -5,6 +5,5 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile.streamlit
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
-
+      - key: WHISPER_MODEL
+        value: tiny.en

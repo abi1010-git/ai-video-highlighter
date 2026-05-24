@@ -4,10 +4,11 @@ import json
 import math
 import os
 import re
-import subprocess
+import shutil
 import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 
 try:
@@ -16,10 +17,6 @@ try:
     load_dotenv()
 except Exception:
     pass
-
-
-class MissingApiKey(RuntimeError):
-    """Raised when transcription needs OpenAI but no API key is configured."""
 
 
 class TranscriptionError(RuntimeError):
@@ -176,6 +173,7 @@ def analyze_video(
     transcript_cache_dir: str | Path = "transcripts",
     force_transcribe: bool = False,
     highlight_model_path: str | Path | None = None,
+    whisper_model: str | None = None,
 ) -> list[Highlight]:
     video_path = Path(video_path)
     if provided_segments is not None:
@@ -187,6 +185,7 @@ def analyze_video(
             video_path,
             cache_dir=Path(transcript_cache_dir),
             force=force_transcribe,
+            whisper_model=whisper_model,
         )
 
     chunks = chunk_segments(segments)
@@ -202,42 +201,19 @@ def transcribe_video(
     video_path: str | Path,
     cache_dir: str | Path = "transcripts",
     force: bool = False,
+    whisper_model: str | None = None,
 ) -> list[TranscriptSegment]:
     video_path = Path(video_path)
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f"{video_path.stem}.transcript.json"
+    whisper_model = whisper_model or os.getenv("WHISPER_MODEL") or "tiny.en"
+    cache_label = _safe_cache_label(f"local-whisper-{whisper_model}")
+    cache_file = cache_dir / f"{video_path.stem}.{cache_label}.transcript.json"
 
     if cache_file.exists() and not force:
         return load_transcript_segments(cache_file)
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise MissingApiKey(
-            "Set OPENAI_API_KEY in a .env file, or provide an SRT/VTT/JSON transcript."
-        )
-
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise TranscriptionError(
-            "Install the OpenAI Python package with: python -m pip install openai"
-        ) from exc
-
-    with tempfile.TemporaryDirectory() as tmp:
-        audio_path = Path(tmp) / "audio.mp3"
-        extract_audio(video_path, audio_path)
-
-        client = OpenAI()
-        with audio_path.open("rb") as audio_file:
-            response = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-            )
-
-    data = _response_to_dict(response)
-    segments = _segments_from_data(data)
+    segments = transcribe_video_with_local_whisper(video_path, model_name=whisper_model)
     cache_file.write_text(
         json.dumps({"segments": [asdict(segment) for segment in segments]}, indent=2),
         encoding="utf-8",
@@ -245,36 +221,68 @@ def transcribe_video(
     return segments
 
 
-def extract_audio(video_path: str | Path, audio_path: str | Path) -> None:
+def transcribe_video_with_local_whisper(
+    video_path: str | Path,
+    model_name: str = "tiny.en",
+) -> list[TranscriptSegment]:
     video_path = Path(video_path)
-    audio_path = Path(audio_path)
+    if not video_path.exists():
+        raise TranscriptionError(f"Video file not found: {video_path}")
 
+    try:
+        model = _load_local_whisper_model(model_name)
+    except ImportError as exc:
+        raise TranscriptionError(
+            "Install OpenAI Whisper with: python -m pip install -U openai-whisper"
+        ) from exc
+    except Exception as exc:
+        raise TranscriptionError(f"Could not load local Whisper model: {exc}") from exc
+
+    _ensure_ffmpeg_on_path()
+
+    try:
+        result = model.transcribe(
+            str(video_path),
+            fp16=False,
+            verbose=False,
+            language="en" if model_name.endswith(".en") else None,
+        )
+    except Exception as exc:
+        raise TranscriptionError(f"Local Whisper transcription failed: {exc}") from exc
+
+    return _segments_from_data(result)
+
+
+@lru_cache(maxsize=4)
+def _load_local_whisper_model(model_name: str):
+    import whisper
+
+    return whisper.load_model(model_name)
+
+
+def _ensure_ffmpeg_on_path() -> None:
     try:
         import imageio_ffmpeg
 
-        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_path = Path(imageio_ffmpeg.get_ffmpeg_exe())
     except Exception:
-        ffmpeg = "ffmpeg"
+        return
 
-    command = [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(video_path),
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-codec:a",
-        "libmp3lame",
-        "-b:a",
-        "32k",
-        str(audio_path),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise TranscriptionError(result.stderr.strip() or "Could not extract audio.")
+    if not ffmpeg_path.exists():
+        return
+
+    if ffmpeg_path.name.lower() not in {"ffmpeg", "ffmpeg.exe"}:
+        shim_dir = Path(tempfile.gettempdir()) / "ai_video_highlighter_ffmpeg"
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim_path = shim_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if not shim_path.exists():
+            shutil.copy2(ffmpeg_path, shim_path)
+        ffmpeg_path = shim_path
+
+    ffmpeg_dir = str(ffmpeg_path.parent)
+    current_paths = os.environ.get("PATH", "").split(os.pathsep)
+    if ffmpeg_dir not in current_paths:
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 
 def load_transcript_segments(transcript_path: str | Path) -> list[TranscriptSegment]:
@@ -466,14 +474,6 @@ def _make_chunk(segments: list[TranscriptSegment]) -> TranscriptChunk:
     )
 
 
-def _response_to_dict(response: object) -> dict[str, object]:
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    if isinstance(response, dict):
-        return response
-    return json.loads(json.dumps(response, default=lambda value: getattr(value, "__dict__", str(value))))
-
-
 def _segments_from_data(data: object) -> list[TranscriptSegment]:
     if isinstance(data, list):
         raw_segments = data
@@ -600,6 +600,10 @@ def _truncate(text: str, limit: int) -> str:
     if len(clean) <= limit:
         return clean
     return clean[: limit - 3].rsplit(" ", 1)[0] + "..."
+
+
+def _safe_cache_label(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value).strip("._-") or "transcript"
 
 
 def _subclip(video, start: float, end: float):
