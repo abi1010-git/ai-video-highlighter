@@ -1,6 +1,6 @@
 # AI Video Highlighter
 
-Upload a video, transcribe it, and rank the most relevant timestamped moments.
+Upload a video, transcribe it, rank the most relevant timestamped moments, and create a jumpcut edit that skips interruptions, breaks, and low-importance sections.
 
 ## Streamlit Website
 
@@ -11,6 +11,13 @@ streamlit run streamlit_app.py
 ```
 
 Then open http://localhost:8501.
+
+The Streamlit app shows:
+
+- the full lecture video
+- a second jumpcut edit below it
+- timestamped highlight cards that jump the full lecture to important moments
+- a download button for the jumpcut MP4
 
 ### Deploy on Streamlit Community Cloud
 
@@ -163,6 +170,8 @@ To export a short highlight reel:
 ```powershell
 python main.py lecture.mp4 --query "important definitions" --make-reel
 ```
+
+The exported reel is a jumpcut edit: it keeps the selected important moments, adds a few seconds of context around each one, merges nearby clips, and skips the rest.
 
 ## Files
 

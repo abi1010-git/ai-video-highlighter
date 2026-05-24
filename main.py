@@ -6,6 +6,7 @@ from pathlib import Path
 from highlighter import (
     MissingApiKey,
     TranscriptionError,
+    VideoEditingError,
     analyze_video,
     cut_highlight_reel,
     seconds_to_timestamp,
@@ -30,7 +31,13 @@ def main() -> int:
     parser.add_argument(
         "--make-reel",
         action="store_true",
-        help="Also export a short highlight reel video.",
+        help="Also export a jumpcut edit that skips low-importance sections.",
+    )
+    parser.add_argument(
+        "--padding",
+        type=float,
+        default=4.0,
+        help="Extra seconds before and after each selected moment in the jumpcut.",
     )
     parser.add_argument(
         "--model",
@@ -69,13 +76,22 @@ def main() -> int:
         print(f"   Why: {highlight.reason}")
 
     if args.make_reel:
-        output = cut_highlight_reel(
-            Path(args.video),
-            highlights,
-            output_path=args.output,
-        )
+        try:
+            output = cut_highlight_reel(
+                Path(args.video),
+                highlights,
+                output_path=args.output,
+                padding_seconds=args.padding,
+                max_clips=args.max_results,
+            )
+        except VideoEditingError as exc:
+            print(f"\nCould not create jumpcut edit: {exc}")
+            return 1
+
         if output:
-            print(f"\nSaved highlight reel: {output}")
+            print(f"\nSaved jumpcut edit: {output}")
+        else:
+            print("\nNo jumpcut edit was created.")
 
     return 0
 

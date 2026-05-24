@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from pathlib import Path
@@ -9,6 +10,7 @@ import streamlit as st
 from highlighter import (
     MissingApiKey,
     TranscriptionError,
+    VideoEditingError,
     analyze_video,
     cut_highlight_reel,
     highlight_to_dict,
@@ -60,37 +62,54 @@ def main() -> None:
             disabled=not MODEL_PATH.exists(),
             help="Train one with train_highlight_model.py.",
         )
-        make_reel = st.checkbox("Create highlight reel", value=False)
+        make_reel = st.checkbox("Create jumpcut edit", value=True)
+        padding_seconds = st.slider(
+            "Context around each moment",
+            min_value=1,
+            max_value=12,
+            value=4,
+            help="Extra seconds kept before and after each important moment.",
+        )
         analyze_clicked = st.button("Analyze video", type="primary", use_container_width=True)
 
     if not video_file:
         _render_empty_state()
         return
 
-    video_path = _save_uploaded_file(video_file, UPLOAD_DIR)
     video_bytes = video_file.getvalue()
+    video_digest = hashlib.sha1(video_bytes).hexdigest()
+    if st.session_state.get("current_video_digest") != video_digest:
+        _clear_previous_analysis()
+        st.session_state.current_video_digest = video_digest
+        st.session_state.selected_start = 0
+
+    video_path = _save_uploaded_bytes(video_file.name, video_bytes, UPLOAD_DIR, "video")
 
     if "selected_start" not in st.session_state:
         st.session_state.selected_start = 0
 
-    video_col, result_col = st.columns([1.2, 1], gap="large")
-    with video_col:
-        st.subheader("Video")
-        st.video(video_bytes, start_time=int(st.session_state.selected_start))
-
     if not analyze_clicked and "last_highlights" not in st.session_state:
+        video_col, result_col = st.columns([1.2, 1], gap="large")
+        with video_col:
+            _render_videos(video_bytes)
         with result_col:
             st.subheader("Highlights")
             st.info("Pick your settings, then click Analyze video.")
         return
 
+    analysis_failed = False
     if analyze_clicked:
         with st.spinner("Finding the most relevant moments..."):
             try:
                 transcript_path = None
                 provided_segments = None
                 if transcript_file:
-                    transcript_path = _save_uploaded_file(transcript_file, TRANSCRIPT_DIR)
+                    transcript_path = _save_uploaded_bytes(
+                        transcript_file.name,
+                        transcript_file.getvalue(),
+                        TRANSCRIPT_DIR,
+                        "transcript",
+                    )
                     provided_segments = load_transcript_segments(transcript_path)
 
                 highlights = analyze_video(
@@ -106,19 +125,55 @@ def main() -> None:
                 st.session_state.last_video_name = video_file.name
                 st.session_state.last_query = query
                 st.session_state.last_highlights = [highlight_to_dict(item) for item in highlights]
-                st.session_state.last_reel_path = None
+                st.session_state.last_jumpcut_path = None
+                st.session_state.jumpcut_warning = None
 
                 if make_reel and highlights:
-                    reel_path = OUTPUT_DIR / f"{video_path.stem}_highlights.mp4"
-                    output = cut_highlight_reel(video_path, highlights, output_path=reel_path)
-                    st.session_state.last_reel_path = str(output) if output else None
-            except (MissingApiKey, TranscriptionError, ValueError) as exc:
-                st.error(str(exc))
-                _render_key_help()
-                return
+                    try:
+                        reel_path = OUTPUT_DIR / f"{video_path.stem}_jumpcut.mp4"
+                        output = cut_highlight_reel(
+                            video_path,
+                            highlights,
+                            output_path=reel_path,
+                            padding_seconds=padding_seconds,
+                            max_clips=max_results,
+                        )
+                        st.session_state.last_jumpcut_path = str(output) if output else None
+                    except VideoEditingError as exc:
+                        st.session_state.jumpcut_warning = str(exc)
+            except MissingApiKey as exc:
+                analysis_failed = True
+                _clear_previous_analysis(keep_current_video=True)
+                _render_analysis_error(str(exc), include_key_help=True)
+            except TranscriptionError as exc:
+                analysis_failed = True
+                _clear_previous_analysis(keep_current_video=True)
+                _render_analysis_error(str(exc), include_key_help=True)
+            except ValueError as exc:
+                analysis_failed = True
+                _clear_previous_analysis(keep_current_video=True)
+                _render_analysis_error(str(exc))
+            except RuntimeError as exc:
+                analysis_failed = True
+                _clear_previous_analysis(keep_current_video=True)
+                _render_analysis_error(str(exc))
+            except Exception as exc:
+                analysis_failed = True
+                _clear_previous_analysis(keep_current_video=True)
+                _render_analysis_error(
+                    "Something unexpected happened while analyzing this video.",
+                    details=str(exc),
+                )
 
+    video_col, result_col = st.columns([1.2, 1], gap="large")
+    with video_col:
+        _render_videos(video_bytes)
     with result_col:
-        _render_highlights()
+        if analysis_failed:
+            st.subheader("Highlights")
+            st.info("Fix the error, then run the analysis again.")
+        else:
+            _render_highlights()
 
 
 def _render_empty_state() -> None:
@@ -129,6 +184,28 @@ def _render_empty_state() -> None:
     with right:
         st.subheader("Highlights")
         st.write("Your timestamped moments will appear here.")
+
+
+def _render_videos(video_bytes: bytes) -> None:
+    st.subheader("Full lecture")
+    st.video(video_bytes, start_time=int(st.session_state.selected_start))
+
+    jumpcut_path = st.session_state.get("last_jumpcut_path")
+    if jumpcut_path and Path(jumpcut_path).exists():
+        st.subheader("Jumpcut edit")
+        jumpcut_bytes = Path(jumpcut_path).read_bytes()
+        st.video(jumpcut_bytes)
+        st.download_button(
+            "Download jumpcut edit",
+            data=jumpcut_bytes,
+            file_name=Path(jumpcut_path).name,
+            mime="video/mp4",
+            use_container_width=True,
+        )
+
+    jumpcut_warning = st.session_state.get("jumpcut_warning")
+    if jumpcut_warning:
+        st.warning(f"Highlights were found, but the jumpcut edit could not be created. {jumpcut_warning}")
 
 
 def _render_highlights() -> None:
@@ -153,17 +230,6 @@ def _render_highlights() -> None:
                 st.session_state.selected_start = int(float(highlight["start"]))
                 st.rerun()
 
-    reel_path = st.session_state.get("last_reel_path")
-    if reel_path and Path(reel_path).exists():
-        st.divider()
-        st.download_button(
-            "Download highlight reel",
-            data=Path(reel_path).read_bytes(),
-            file_name=Path(reel_path).name,
-            mime="video/mp4",
-            use_container_width=True,
-        )
-
 
 def _render_key_help() -> None:
     st.info(
@@ -173,11 +239,52 @@ def _render_key_help() -> None:
     )
 
 
-def _save_uploaded_file(uploaded_file, folder: Path) -> Path:
-    safe_name = Path(uploaded_file.name).name.replace(" ", "_")
+def _render_analysis_error(
+    message: str,
+    include_key_help: bool = False,
+    details: str | None = None,
+) -> None:
+    st.error(message)
+    if include_key_help:
+        _render_key_help()
+    if details:
+        with st.expander("Error details"):
+            st.code(details)
+
+
+def _save_uploaded_bytes(
+    filename: str,
+    data: bytes,
+    folder: Path,
+    key_prefix: str,
+) -> Path:
+    digest = hashlib.sha1(data).hexdigest()
+    state_key = f"{key_prefix}_{digest}_path"
+    existing_path = st.session_state.get(state_key)
+    if existing_path and Path(existing_path).exists():
+        return Path(existing_path)
+
+    safe_name = Path(filename).name.replace(" ", "_")
     destination = folder / f"{uuid.uuid4().hex}_{safe_name}"
-    destination.write_bytes(uploaded_file.getvalue())
+    destination.write_bytes(data)
+    st.session_state[state_key] = str(destination)
     return destination
+
+
+def _clear_previous_analysis(keep_current_video: bool = False) -> None:
+    keys = [
+        "last_video_path",
+        "last_video_name",
+        "last_query",
+        "last_highlights",
+        "last_jumpcut_path",
+        "jumpcut_warning",
+    ]
+    if not keep_current_video:
+        keys.append("current_video_digest")
+
+    for key in keys:
+        st.session_state.pop(key, None)
 
 
 def _load_streamlit_secret() -> None:

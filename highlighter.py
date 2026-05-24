@@ -50,6 +50,16 @@ class Highlight:
     reason: str
 
 
+@dataclass(frozen=True)
+class ClipRange:
+    start: float
+    end: float
+
+
+class VideoEditingError(RuntimeError):
+    """Raised when the app cannot create the jumpcut edit."""
+
+
 IMPORTANT_PHRASES: tuple[tuple[str, float], ...] = (
     ("important", 2.2),
     ("key idea", 2.4),
@@ -372,8 +382,9 @@ def cut_highlight_reel(
     video_path: str | Path,
     highlights: list[Highlight],
     output_path: str | Path = "outputs/highlights.mp4",
-    padding_seconds: float = 3.0,
+    padding_seconds: float = 4.0,
     max_clips: int = 10,
+    merge_gap_seconds: float = 6.0,
 ) -> Path | None:
     if not highlights:
         return None
@@ -386,13 +397,26 @@ def cut_highlight_reel(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    video = VideoFileClip(str(video_path))
+    video_path = Path(video_path)
+    if not video_path.exists():
+        raise VideoEditingError(f"Video file not found: {video_path}")
+
+    try:
+        video = VideoFileClip(str(video_path))
+    except Exception as exc:
+        raise VideoEditingError(f"Could not open video for editing: {exc}") from exc
+
     clips = []
     try:
-        for highlight in highlights[:max_clips]:
-            start = max(0, highlight.start - padding_seconds)
-            end = min(video.duration, highlight.end + padding_seconds)
-            clips.append(_subclip(video, start, end))
+        ranges = _clip_ranges_from_highlights(
+            highlights,
+            duration=float(video.duration),
+            padding_seconds=padding_seconds,
+            max_clips=max_clips,
+            merge_gap_seconds=merge_gap_seconds,
+        )
+        for clip_range in ranges:
+            clips.append(_subclip(video, clip_range.start, clip_range.end))
 
         if not clips:
             return None
@@ -403,7 +427,10 @@ def cut_highlight_reel(
                 str(output_path),
                 codec="libx264",
                 audio_codec="aac",
+                logger=None,
             )
+        except Exception as exc:
+            raise VideoEditingError(f"Could not write jumpcut edit: {exc}") from exc
         finally:
             final.close()
     finally:
@@ -412,6 +439,23 @@ def cut_highlight_reel(
         video.close()
 
     return output_path
+
+
+def jumpcut_duration_estimate(
+    highlights: list[Highlight],
+    source_duration: float,
+    padding_seconds: float = 4.0,
+    max_clips: int = 10,
+    merge_gap_seconds: float = 6.0,
+) -> float:
+    ranges = _clip_ranges_from_highlights(
+        highlights,
+        duration=source_duration,
+        padding_seconds=padding_seconds,
+        max_clips=max_clips,
+        merge_gap_seconds=merge_gap_seconds,
+    )
+    return sum(clip_range.end - clip_range.start for clip_range in ranges)
 
 
 def _make_chunk(segments: list[TranscriptSegment]) -> TranscriptChunk:
@@ -562,6 +606,36 @@ def _subclip(video, start: float, end: float):
     if hasattr(video, "subclipped"):
         return video.subclipped(start, end)
     return video.subclip(start, end)
+
+
+def _clip_ranges_from_highlights(
+    highlights: list[Highlight],
+    duration: float,
+    padding_seconds: float,
+    max_clips: int,
+    merge_gap_seconds: float,
+) -> list[ClipRange]:
+    if duration <= 0:
+        return []
+
+    selected = sorted(
+        sorted(highlights, key=lambda item: item.score, reverse=True)[:max_clips],
+        key=lambda item: item.start,
+    )
+
+    ranges: list[ClipRange] = []
+    for highlight in selected:
+        start = max(0.0, highlight.start - padding_seconds)
+        end = min(duration, highlight.end + padding_seconds)
+        if end - start < 1:
+            continue
+
+        if ranges and start <= ranges[-1].end + merge_gap_seconds:
+            ranges[-1] = ClipRange(start=ranges[-1].start, end=max(ranges[-1].end, end))
+        else:
+            ranges.append(ClipRange(start=start, end=end))
+
+    return ranges
 
 
 def _load_model_probabilities(
