@@ -4,6 +4,8 @@ Upload a video, transcribe it, rank the most relevant timestamped moments, and c
 
 ## Streamlit Website
 
+Live app: https://aivideohighlighter.streamlit.app/
+
 Run the Streamlit version locally:
 
 ```powershell
