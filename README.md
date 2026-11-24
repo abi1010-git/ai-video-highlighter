@@ -2,6 +2,8 @@
 
 Upload a video, transcribe it with local OpenAI Whisper, rank the most relevant timestamped moments, and create a jumpcut edit that skips interruptions, breaks, and low-importance sections.
 
+![AI Video Highlighter](./vid%20hlit.jpg)
+
 ## Streamlit-Website Link
 
 Live app: https://aivideohighlighter.streamlit.app/
